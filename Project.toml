@@ -10,19 +10,21 @@ Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
-
-[extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 
 [compat]
+Base64 = "≥ 1.11.0"
 BaseDirs = "≥ 1.2.4"
 Dates = "≥ 1.11.0"
 HTTP = "≥ 1.10.8"
 JLD2 = "≥ 0.5.10"
-julia = "≥ 1"
-Base64 = "≥ 1.11.0"
 JSON3 = "≥ 1.14.1"
+SHA = "0.7.0"
+julia = "≥ 1"
+
+[extras]
+Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Aqua", "Test"]

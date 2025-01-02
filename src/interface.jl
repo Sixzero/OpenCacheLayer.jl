@@ -35,3 +35,5 @@ function get_new_content end
 Refresh the content to get the latest state.
 """
 function refresh_content end
+
+function get_adapter_hash end
