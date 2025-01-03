@@ -20,11 +20,19 @@ Verify if stored content is still valid.
 """
 function validate_content end
 
+"""
+    supports_time_range(adapter::ContentAdapter) -> Bool
+
+Check if adapter supports both 'from' and 'to' parameters for time range queries.
+Default implementation returns false for backward compatibility.
+"""
+supports_time_range(::ContentAdapter) = false
+
 # Methods for message-based adapters
 """
-    get_new_content(adapter::MessageBasedAdapter) -> Vector{ContentItem}
+    get_new_content(adapter::MessageBasedAdapter; from::DateTime, to::Union{DateTime,Nothing}=nothing) -> Vector{ContentItem}
 
-Fetch new content since the last check.
+Fetch new content within the specified time range. The 'to' parameter is optional.
 """
 function get_new_content end
 

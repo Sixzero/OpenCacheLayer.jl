@@ -43,11 +43,11 @@ function group_by_chat(items::Vector{ContentItem})
     chats
 end
 
-function get_new_content(cache::ChatsCacheLayer, from::DateTime=now() - Day(1))
+function get_new_content(cache::ChatsCacheLayer; from::DateTime=now() - Day(1), to::Union{DateTime,Nothing}=nothing)
     cached_chats, last_timestamp = load_chat_cache(cache, from)
     
     if !isnothing(last_timestamp)
-        new_items = get_new_content(cache.adapter, last_timestamp)
+        new_items = get_new_content(cache.adapter; from=last_timestamp, to=to)
         for (chat_id, messages) in group_by_chat(new_items)
             if haskey(cached_chats, chat_id)
                 append!(cached_chats[chat_id], messages)
@@ -57,13 +57,13 @@ function get_new_content(cache::ChatsCacheLayer, from::DateTime=now() - Day(1))
             end
         end
     else
-        cached_chats = group_by_chat(get_new_content(cache.adapter, from))
+        cached_chats = group_by_chat(get_new_content(cache.adapter; from=from, to=to))
     end
     
     save_chat_cache(cache, from, cached_chats)
     cached_chats
 end
 
-# Helper to get messages from a specific chat
-get_chat(cache::ChatsCacheLayer, chat_id::String, from::DateTime=now() - Day(7)) = 
-    get(get_new_content(cache, from), chat_id, ContentItem[])
+# Update the helper function too
+get_chat(cache::ChatsCacheLayer, chat_id::String; from::DateTime=now() - Day(7), to::Union{DateTime,Nothing}=nothing) = 
+    get(get_new_content(cache; from, to), chat_id, ContentItem[])

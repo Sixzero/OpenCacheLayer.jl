@@ -45,14 +45,24 @@ function save_cache(cache::CacheLayer, from::DateTime, items::Vector{ContentItem
     ))
 end
 
-function get_new_content(cache::CacheLayer, from::DateTime=now() - Day(1))
+function get_new_content(cache::CacheLayer; from::DateTime=now() - Day(1), to::Union{DateTime,Nothing}=nothing)
     cached_items, last_timestamp = load_cache(cache, from)
     
-    if !isnothing(cached_items) && false
-        new_items = get_new_content(cache.adapter, last_timestamp)
-        items = vcat(cached_items, new_items)
+    if !isnothing(cached_items)
+        earliest_cached = minimum(item.timestamp for item in cached_items)
+        
+        if from < earliest_cached && supports_time_range(cache.adapter)
+            historical_items = get_new_content(cache.adapter; from=from, to=earliest_cached)
+            new_items = get_new_content(cache.adapter; from=last_timestamp, to)
+            items = vcat(historical_items, cached_items, new_items)
+        elseif from < earliest_cached
+            items = get_new_content(cache.adapter; from, to)
+        else
+            new_items = get_new_content(cache.adapter; from=last_timestamp, to)
+            items = vcat(cached_items, new_items)
+        end
     else
-        items = get_new_content(cache.adapter, from)
+        items = get_new_content(cache.adapter; from, to)
     end
     
     save_cache(cache, from, items)
