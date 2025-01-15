@@ -5,21 +5,21 @@ using Base64
 using HTTP
 using JSON3
 
-include("types.jl")
 include("interface.jl")
-include("CacheLayer.jl")
-include("ChatCacheLayer.jl")
+include("DictCacheLayer.jl")
+include("VectorCacheLayer.jl")
 
 # Export core types
 export ContentAdapter, StatusBasedAdapter, ChatsLikeAdapter
-export ContentItem, MessageMetadata, StatusMetadata, AdapterConfig
+export AbstractContent, AbstractMessage, AbstractWebContent
 
 # Export interface functions
-export get_content, process_raw, validate_content
-export get_new_content, refresh_content
+export get_content
+export is_cache_valid, supports_time_range
+export get_adapter_hash
 
 # Export cache layers
-export CacheLayer, ChatsCacheLayer
+export DictCacheLayer, ChatsCacheLayer, VectorCacheLayer
 export get_chat  # Helper for chat operations
 
 end
