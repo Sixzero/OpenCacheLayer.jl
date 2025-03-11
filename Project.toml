@@ -1,7 +1,7 @@
 name = "OpenCacheLayer"
 uuid = "4de98fc9-41a1-4102-8830-500bdec15e50"
 authors = ["SixZero <havliktomi@hotmail.com> and contributors"]
-version = "1.0.0-DEV"
+version = "1.1.0"
 
 [deps]
 Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"

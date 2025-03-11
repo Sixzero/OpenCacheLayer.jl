@@ -38,7 +38,7 @@ function ensure_cache_loaded!(cache::DictCacheLayer)
     isnothing(cache.cache) || return
     
     cache_path = get_cache_path(cache)
-    rm(cache)
+    
     if isfile(cache_path)
         lock(cache.file_lock) do
             jldopen(cache_path, "r") do f
@@ -47,10 +47,10 @@ function ensure_cache_loaded!(cache::DictCacheLayer)
                     # Convert JLD2 group to Dict
                     group = f[escaped_key]
                     entry = (
-                        content = group["content"],
-                        created_at = group["created_at"],
-                        accessed_at = group["accessed_at"],
-                        hits = group["hits"]
+                        content = group.content,
+                        created_at = group.created_at,
+                        accessed_at = group.accessed_at,
+                        hits = group.hits
                     )
                     key = unescape_key(escaped_key)
                     cache.cache[key] = entry
