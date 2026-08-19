@@ -32,3 +32,13 @@ function OpenCacheLayer.get_content(::TestAdapter; from::DateTime=now()-Day(1), 
 end
 
 OpenCacheLayer.get_adapter_hash(::TestAdapter) = "test_adapter_v1"
+
+struct DummyContent <: AbstractWebContent
+    value::String
+end
+
+struct KeyedTestAdapter <: StatusBasedAdapter end
+
+OpenCacheLayer.get_content(::KeyedTestAdapter, key; kw...) = DummyContent("content for $key")
+OpenCacheLayer.is_cache_valid(::DummyContent, ::KeyedTestAdapter) = OpenCacheLayer.VALID
+OpenCacheLayer.get_adapter_hash(::KeyedTestAdapter) = "keyed_test_adapter_v1"

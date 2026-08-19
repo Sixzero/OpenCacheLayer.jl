@@ -6,6 +6,7 @@ using HTTP
 using JSON3
 
 include("interface.jl")
+include("store.jl")
 include("DictCacheLayer.jl")
 include("VectorCacheLayer.jl")
 
@@ -19,7 +20,6 @@ export is_cache_valid, supports_time_range
 export get_adapter_hash
 
 # Export cache layers
-export DictCacheLayer, ChatsCacheLayer, VectorCacheLayer
-export get_chat  # Helper for chat operations
+export DictCacheLayer, VectorCacheLayer
 
 end

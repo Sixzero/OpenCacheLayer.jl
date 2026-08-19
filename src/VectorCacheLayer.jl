@@ -1,116 +1,67 @@
 using Dates
-using JLD2
-using BaseDirs
-using SHA
 using Base.Threads: ReentrantLock
 
-mutable struct VectorCacheLayer{T<:ContentAdapter} <: AbstractCacheLayer
+# One file per message. The whole set is loaded up front because every query needs the
+# cached span (min/max timestamp) to decide what is missing — unlike the Dict layer,
+# there is no single key to look up.
+struct VectorCacheLayer{T<:ContentAdapter} <: AbstractCacheLayer
     adapter::T
     cache_dir::String
     max_age::Period
-    cache::Union{Dict{String,Vector{AbstractMessage}},Nothing}
-    file_lock::ReentrantLock
+    items::Vector{AbstractMessage}
+    pending_writes::Vector{Task}
+    mem_lock::ReentrantLock
 end
 
-function VectorCacheLayer(adapter::T; max_age::Period=Day(30)) where T<:ContentAdapter
-    project = BaseDirs.Project("OpenCacheLayer")
-    cache_dir = BaseDirs.User.cache(project; create=true)
-    VectorCacheLayer(adapter, cache_dir, max_age, nothing, ReentrantLock())
+function VectorCacheLayer(adapter::ContentAdapter, cache_dir::String=default_cache_dir(adapter, "_v2");
+                          max_age::Period=Day(30))
+    items = AbstractMessage[v for (_, v) in read_all_entries(cache_dir) if v isa AbstractMessage]
+    VectorCacheLayer(adapter, cache_dir, max_age, items, Task[], ReentrantLock())
 end
 
-function get_cache_path(cache::AbstractCacheLayer)
-    adapter_type = string(typeof(cache.adapter).name.name)
-    adapter_hash = bytes2hex(sha256(get_adapter_hash(cache.adapter)))
-    cache_id = isempty(adapter_hash) ? adapter_type : "$(adapter_type)_$(adapter_hash)_v2"
-    joinpath(cache.cache_dir, "$(cache_id).jld2")
-end
-
-function ensure_cache_loaded!(cache::VectorCacheLayer)
-    isnothing(cache.cache) || return
-    
-    cache_path = get_cache_path(cache)
-    cache.cache = Dict{String,Vector{AbstractMessage}}()
-    
-    isfile(cache_path) || return
-    
-    lock(cache.file_lock) do
-        jldopen(cache_path, "r") do f
-            haskey(f, "items") || return
-            item_keys = keys(f["items"])
-            items = Vector{AbstractMessage}(undef, length(item_keys))
-            for (i, id) in enumerate(item_keys)
-                items[i] = f["items/$id"]
-            end
-            cache.cache[cache_path] = items
-        end
-    end
-end
+item_id(item::AbstractMessage) = string(something(get_unique_id(item), hash(item)))
 
 function append_to_store!(cache::VectorCacheLayer, items::Vector{<:AbstractMessage})
-    isempty(items) && return Vector{AbstractMessage}()
-    
-    ensure_cache_loaded!(cache)
-    cache_path = get_cache_path(cache)
-    
-    # Filter new items based on existing ones
-    existing_items = get!(Vector{AbstractMessage}, cache.cache, cache_path)
-    existing_ids = Set(string(something(get_unique_id(item), hash(item))) for item in existing_items)
-    new_items = filter(items) do item
-        id = string(something(get_unique_id(item), hash(item)))
-        !in(id, existing_ids)
+    # Dedupe and append in one critical section, so a concurrent reader never observes
+    # the vector mid-append. `known` grows as we go, so a batch containing the same id
+    # twice still only adds it once.
+    new_items = lock(cache.mem_lock) do
+        known = Set(item_id(item) for item in cache.items)
+        fresh = filter(item -> item_id(item) ∉ known && (push!(known, item_id(item)); true), items)
+        append!(cache.items, fresh)
+        fresh
     end
-    
-    isempty(new_items) && return Vector{AbstractMessage}()
+    isempty(new_items) && return new_items
 
-    append!(existing_items, new_items)
-    
-    @async_showerr lock(cache.file_lock) do
-        jldopen(cache_path, "a+") do f
-            for item in new_items
-                id = string(something(get_unique_id(item), hash(item)))
-                f["items/$id"] = item
-            end
+    track_write!(cache) do
+        for item in new_items
+            store_entry!(cache.cache_dir, item_id(item), item)
         end
     end
-    
     new_items
 end
 
 function get_content(cache::VectorCacheLayer; from::DateTime=now() - Day(1), to::DateTime=now(), kw...)
-    ensure_cache_loaded!(cache)
-    cached_items = get(cache.cache, get_cache_path(cache), nothing)
-    
-    if !isnothing(cached_items)
-        earliest_cached = minimum(get_timestamp(item) for item in cached_items)
-        latest_cached = maximum(get_timestamp(item) for item in cached_items)
-        
-        if from < earliest_cached && supports_time_range(cache.adapter)
-            historical = get_content(cache.adapter; from=from, to=earliest_cached, kw...)
-            latest = get_content(cache.adapter; from=latest_cached, to, kw...)
-            new_historical = append_to_store!(cache, historical)
-            new_latest = append_to_store!(cache, latest)
-            items = vcat(new_historical, cached_items, new_latest)
-        elseif from < earliest_cached
-            new_content = get_content(cache.adapter; from, to, kw...)
-            items = append_to_store!(cache, new_content)
-        else
-            latest = get_content(cache.adapter; from=latest_cached, to, kw...)
-            new_items = append_to_store!(cache, latest)
-            items = vcat(cached_items, new_items)
-        end
+    cached = lock(() -> copy(cache.items), cache.mem_lock)
+
+    if isempty(cached)
+        append_to_store!(cache, get_content(cache.adapter; from, to, kw...))
     else
-        new_content = get_content(cache.adapter; from, to, kw...)
-        items = append_to_store!(cache, new_content)
+        earliest = minimum(get_timestamp(item) for item in cached)
+        latest = maximum(get_timestamp(item) for item in cached)
+        # Only the ends of the requested range can be missing; the cached span is covered
+        from < earliest && append_to_store!(cache,
+            get_content(cache.adapter; from, to=supports_time_range(cache.adapter) ? earliest : to, kw...))
+        to > latest && append_to_store!(cache, get_content(cache.adapter; from=latest, to, kw...))
     end
-    
-    # Filter items based on the requested time range
-    filter(item -> from <= get_timestamp(item) <= to, items)
+
+    lock(cache.mem_lock) do
+        filter(item -> from <= get_timestamp(item) <= to, cache.items)
+    end
 end
 
 function Base.rm(cache::VectorCacheLayer)
-    cache_path = get_cache_path(cache)
-    lock(cache.file_lock) do
-        cache.cache = nothing
-        isfile(cache_path) && rm(cache_path, force=true)
-    end
+    wait(cache)  # else a queued write recreates a file we are about to delete
+    lock(() -> empty!(cache.items), cache.mem_lock)
+    rm(cache.cache_dir; force=true, recursive=true)
 end
