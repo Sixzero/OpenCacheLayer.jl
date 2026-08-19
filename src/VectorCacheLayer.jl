@@ -9,14 +9,13 @@ struct VectorCacheLayer{T<:ContentAdapter} <: AbstractCacheLayer
     cache_dir::String
     max_age::Period
     items::Vector{AbstractMessage}
-    pending_writes::Vector{Task}
     mem_lock::ReentrantLock
 end
 
 function VectorCacheLayer(adapter::ContentAdapter, cache_dir::String=default_cache_dir(adapter, "_v2");
                           max_age::Period=Day(30))
-    items = AbstractMessage[v for (_, v) in read_all_entries(cache_dir) if v isa AbstractMessage]
-    VectorCacheLayer(adapter, cache_dir, max_age, items, Task[], ReentrantLock())
+    items = AbstractMessage[v for v in read_all_entries(cache_dir) if v isa AbstractMessage]
+    VectorCacheLayer(adapter, cache_dir, max_age, items, ReentrantLock())
 end
 
 item_id(item::AbstractMessage) = string(something(get_unique_id(item), hash(item)))
@@ -31,12 +30,8 @@ function append_to_store!(cache::VectorCacheLayer, items::Vector{<:AbstractMessa
         append!(cache.items, fresh)
         fresh
     end
-    isempty(new_items) && return new_items
-
-    track_write!(cache) do
-        for item in new_items
-            store_entry!(cache.cache_dir, item_id(item), item)
-        end
+    for item in new_items
+        store_entry!(cache.cache_dir, item_id(item), item)
     end
     new_items
 end
@@ -61,7 +56,6 @@ function get_content(cache::VectorCacheLayer; from::DateTime=now() - Day(1), to:
 end
 
 function Base.rm(cache::VectorCacheLayer)
-    wait(cache)  # else a queued write recreates a file we are about to delete
     lock(() -> empty!(cache.items), cache.mem_lock)
     rm(cache.cache_dir; force=true, recursive=true)
 end

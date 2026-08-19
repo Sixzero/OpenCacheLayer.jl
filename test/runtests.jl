@@ -13,12 +13,12 @@ include("test_adapter.jl")
 
     @testset "a torn write cannot damage a stored entry" begin
         mktempdir() do dir
-            store_entry!(dir, "k", (content="good", hits=1))
+            store_entry!(dir, "k", "good")
 
             # What a process killed mid-write leaves behind: a half-written temp file.
             # The rename never happened, so the entry itself must be untouched.
             write(joinpath(dir, "jl_halfwritten"), rand(UInt8, 64))
-            @test read_entry(dir, "k").content == "good"
+            @test read_entry(dir, "k") == "good"
 
             # A damaged entry is a miss, not an error. It is left on disk: "unreadable"
             # also covers a content type this process cannot load, and deleting on that
@@ -27,8 +27,8 @@ include("test_adapter.jl")
             write(path, rand(UInt8, 64))
             @test read_entry(dir, "k") === nothing
             @test isfile(path)
-            store_entry!(dir, "k", (content="refetched", hits=1))
-            @test read_entry(dir, "k").content == "refetched"
+            store_entry!(dir, "k", "refetched")
+            @test read_entry(dir, "k") == "refetched"
         end
     end
 
@@ -39,7 +39,7 @@ include("test_adapter.jl")
             writer = """
             using OpenCacheLayer: store_entry!
             for i in 1:100
-                store_entry!($(repr(dir)), "p\$(ARGS[1])_\$i", (content="v\$i", hits=1))
+                store_entry!($(repr(dir)), "p\$(ARGS[1])_\$i", "v\$i")
             end
             """
             procs = [run(`$(Base.julia_cmd()) --startup-file=no --project=$(dirname(@__DIR__)) -e $writer $p`; wait=false)
@@ -48,7 +48,7 @@ include("test_adapter.jl")
             @test all(p -> p.exitcode == 0, procs)
 
             for p in 1:2, i in 1:100
-                @test read_entry(dir, "p$(p)_$i").content == "v$i"
+                @test read_entry(dir, "p$(p)_$i") == "v$i"
             end
         end
     end
@@ -58,19 +58,13 @@ include("test_adapter.jl")
             cache = DictCacheLayer(KeyedTestAdapter(), joinpath(dir, "cache"))
 
             @test get_content(cache, "a").value == "content for a"
-            @test cache.cache["a"].hits == 1
             @test get_content(cache, "a").value == "content for a"  # served from memory
-            @test cache.cache["a"].hits == 2
 
             # Entries survive a reload from disk, and load lazily: a fresh layer starts
             # empty and only pulls in the key it is asked for
-            wait(cache)
             reloaded = DictCacheLayer(KeyedTestAdapter(), cache.cache_dir)
             @test isempty(reloaded.cache)
             @test get_content(reloaded, "a").value == "content for a"
-            # Stats are memory-only, so disk still holds the hits=1 from the first fetch:
-            # the reload continues from there rather than starting over
-            @test reloaded.cache["a"].hits == 2
 
             rm(cache)
             @test isempty(cache.cache)
@@ -90,18 +84,8 @@ include("test_adapter.jl")
                 Threads.@spawn get_content(cache, k)
             end
             @test length(cache.cache) == length(keys_used)
+            @test all(k -> get_content(cache, k).value == "content for $k", keys_used)
 
-            # Same key from every task: hits is a read-modify-write, so an increment is
-            # lost unless the whole update happens in one critical section
-            hammered = "key_1"
-            before = cache.cache[hammered].hits
-            @sync for _ in 1:200
-                Threads.@spawn get_content(cache, hammered)
-            end
-            @test cache.cache[hammered].hits == before + 200
-
-            # Writes are fire-and-forget: drain them before mktempdir pulls the dir out
-            # from under an in-flight write
             rm(cache)
         end
     end
@@ -127,7 +111,6 @@ include("test_adapter.jl")
             @test all(base_date-Day(2) <= item.timestamp <= base_date+Day(1) for item in items)
 
             # Items survive a reload from disk
-            wait(cache)
             reloaded = VectorCacheLayer(TestAdapter(), cache.cache_dir)
             @test length(reloaded.items) == length(cache.items)
 
@@ -141,7 +124,6 @@ include("test_adapter.jl")
         mktempdir() do dir
             cache = VectorCacheLayer(TestAdapter(), joinpath(dir, "cache"))
             get_content(cache; from=DateTime(2024, 1, 1), to=DateTime(2024, 1, 3))
-            wait(cache)
 
             # One damaged file used to quarantine the whole store; now it costs one item
             damaged = first(filter(endswith(".jld2"), readdir(cache.cache_dir; join=true)))

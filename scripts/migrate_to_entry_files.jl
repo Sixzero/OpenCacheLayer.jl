@@ -39,6 +39,9 @@ function migrate_file(path::String)
                 $(basename(path)) holds types this process cannot load, so every entry \
                 would be migrated as an unreadable placeholder. Re-run with the package \
                 that defines them loaded (e.g. `using OpenContentBroker`).""")
+            # The old Dict layout wrapped content in a (content, created_at, ...) tuple;
+            # the store now keeps just the content itself.
+            entry isa NamedTuple && hasproperty(entry, :content) && (entry = entry.content)
             store_entry!(dir, key, entry)
             moved += 1
         end
